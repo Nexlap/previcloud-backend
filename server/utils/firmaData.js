@@ -152,22 +152,15 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
-function formattaDataFirma(firmatoAt) {
-  const d = firmatoAt ? new Date(firmatoAt) : new Date()
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
 function bloccoFirmaCliente(firmaUrl, nomeCliente, firmatoAt, metodoFirma) {
-  const data = formattaDataFirma(firmatoAt)
   const rigaAttestazione = formattaFirmaDigitaleCliente(firmatoAt, metodoFirma)
   const nome = escapeHtml(nomeCliente || 'Cliente')
   const rigaAttestazioneHtml = rigaAttestazione
-    ? `<div style="font-size:10px;color:#6B7280;margin-bottom:6px;">${escapeHtml(rigaAttestazione)}</div>`
+    ? `<div style="font-size:10px;color:#6B7280;margin-top:5px;margin-bottom:6px;">${escapeHtml(rigaAttestazione)}</div>`
     : ''
   return `
     <div data-section="firma-cliente" style="margin-top:18px;max-width:260px;text-align:left;min-height:${FIRMA_CLIENTE_RESERVE_PX}px;">
-      <div style="font-size:10px;font-weight:600;color:#6B7280;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Data e firma del cliente</div>
-      <div style="font-size:11px;color:#374151;margin-bottom:6px;">${escapeHtml(data)}</div>
+      <div style="font-size:10px;font-weight:600;color:#6B7280;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">Data e firma del cliente</div>
       <img src="${firmaUrl}" alt="Firma ${nome}" style="display:block;height:48px;max-width:220px;object-fit:contain;object-position:left bottom;margin-bottom:5px;" />
       ${rigaAttestazioneHtml}
       <div style="border-bottom:1px solid #374151;width:210px;"></div>
