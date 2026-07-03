@@ -12,8 +12,20 @@ const {
   SIGNED_URL_EXPIRY_ARTIGIANO_SEC,
   signedUrlArtigianoPdfReference,
 } = require('../utils/pdfSignedUrls')
+const {
+  creaPreventivoBozza,
+  caricaBozzaFinalizzabile,
+  finalizzaPreventivoBozza,
+} = require('../utils/preventivoBozza')
 
 const stripe = getStripeClient()
+
+function sendRouteError(res, err) {
+  if (err?.status && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message })
+  }
+  return sendError(res, err)
+}
 
 function dataScadenzaRata(anno, mese, giornoScadenza) {
   const ultimoGiorno = new Date(anno, mese, 0).getDate()
@@ -40,12 +52,50 @@ router.post('/api/genera-pdf-file', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
   try {
+    const { preventivo_id: preventivoIdBozza, pdf_url: pdfUrlBody } = req.body
+    let bozza = null
+    if (preventivoIdBozza) {
+      bozza = await caricaBozzaFinalizzabile(user.id, preventivoIdBozza)
+      if (!bozza) {
+        return res.status(404).json({ error: 'Bozza non trovata o già finalizzata' })
+      }
+    }
+
     const { html, versione, numeroPreventivo } = await generaHtmlPreventivo(req, user, { assegnaNumero: true })
     const pdfBuffer = await generaPdfBufferDaHtml(html)
     trackEvento({ userId: user.id, evento: 'pdf_generato', schermata: 'preventivo-pdf', dati: { template: req.body.template, versione } })
-    res.json({ pdf_base64: Buffer.from(pdfBuffer).toString('base64'), versione, numeroPreventivo, numeroProvvisorio: false, html })
+
+    if (bozza) {
+      await finalizzaPreventivoBozza(user.id, bozza.id, {
+        numeroPreventivo,
+        testo: req.body.testo,
+        versione,
+        pdf_url: pdfUrlBody,
+      })
+    }
+
+    const payload = {
+      pdf_base64: Buffer.from(pdfBuffer).toString('base64'),
+      versione,
+      numeroPreventivo,
+      numeroProvvisorio: false,
+      html,
+    }
+    if (bozza) payload.preventivo_id = bozza.id
+    res.json(payload)
   } catch (err) {
-    sendError(res, err)
+    sendRouteError(res, err)
+  }
+})
+
+router.post('/api/preventivi/bozza', express.json(), async (req, res) => {
+  const user = await verificaUtente(req, res)
+  if (!user) return
+  try {
+    const data = await creaPreventivoBozza(user.id, req.body)
+    res.json(data)
+  } catch (err) {
+    sendRouteError(res, err)
   }
 })
 
