@@ -50,4 +50,31 @@ async function inviaEmailPagamentoClienteOk({ emailCliente, nomeCliente, importo
   }
 }
 
-module.exports = { inviaEmailPagamentoRicevuto, inviaEmailPagamentoClienteOk }
+async function inviaEmailOtpFirma({ emailCliente, nomeCliente, nomeArtigiano, codice }) {
+  if (!resend) {
+    console.warn('[email] inviaEmailOtpFirma: RESEND_API_KEY assente, email non inviata')
+    return
+  }
+  try {
+    await resend.emails.send({
+      from: FROM,
+      to: emailCliente,
+      subject: 'Codice di verifica — Firma preventivo',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 16px">
+          <h2 style="color:#0D1B2A">Verifica la tua identità</h2>
+          <p>Ciao${nomeCliente ? ` ${nomeCliente}` : ''},</p>
+          <p>Per firmare il preventivo${nomeArtigiano ? ` di <strong>${nomeArtigiano}</strong>` : ''}, usa questo codice:</p>
+          <p style="font-size:28px;font-weight:700;letter-spacing:6px;color:#0E9F8E;margin:24px 0">${codice}</p>
+          <p style="font-size:13px;color:#666">Il codice scade tra <strong>10 minuti</strong>. Se non hai richiesto tu questo codice, ignora l'email.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+          <p style="font-size:12px;color:#888">PreventivoAI — PreviCloud</p>
+        </div>
+      `,
+    })
+  } catch (err) {
+    console.error('[email] inviaEmailOtpFirma:', err.message)
+  }
+}
+
+module.exports = { inviaEmailPagamentoRicevuto, inviaEmailPagamentoClienteOk, inviaEmailOtpFirma }

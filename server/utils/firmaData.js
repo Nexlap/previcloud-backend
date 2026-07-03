@@ -1,6 +1,6 @@
 const crypto = require('crypto')
 const { supabase } = require('../config')
-const { generaHTML } = require('./templates')
+const { generaHTML, formattaFirmaDigitaleCliente } = require('./templates')
 const { generaPdfBufferDaHtml } = require('./pdfRenderer')
 const {
   BUCKET_PREVENTIVI_PDF,
@@ -100,7 +100,7 @@ async function risolviInvioDaToken(token) {
   const tokenHash = hashToken(token)
   const { data: invio, error } = await supabase
     .from('preventivo_invii')
-    .select('*, preventivi(id, testo_preventivo, template, importo_totale, stato, titolo, pdf_url, cliente_id, nome_cliente, user_id, clienti(nome))')
+    .select('*, preventivi(id, testo_preventivo, template, importo_totale, stato, titolo, pdf_url, cliente_id, nome_cliente, user_id, clienti(nome, email))')
     .eq('token_hash', tokenHash)
     .maybeSingle()
 
@@ -157,14 +157,19 @@ function formattaDataFirma(firmatoAt) {
   return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
-function bloccoFirmaCliente(firmaUrl, nomeCliente, firmatoAt) {
+function bloccoFirmaCliente(firmaUrl, nomeCliente, firmatoAt, metodoFirma) {
   const data = formattaDataFirma(firmatoAt)
+  const rigaAttestazione = formattaFirmaDigitaleCliente(firmatoAt, metodoFirma)
   const nome = escapeHtml(nomeCliente || 'Cliente')
+  const rigaAttestazioneHtml = rigaAttestazione
+    ? `<div style="font-size:10px;color:#6B7280;margin-bottom:6px;">${escapeHtml(rigaAttestazione)}</div>`
+    : ''
   return `
     <div data-section="firma-cliente" style="margin-top:18px;max-width:260px;text-align:left;min-height:${FIRMA_CLIENTE_RESERVE_PX}px;">
       <div style="font-size:10px;font-weight:600;color:#6B7280;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Data e firma del cliente</div>
       <div style="font-size:11px;color:#374151;margin-bottom:6px;">${escapeHtml(data)}</div>
       <img src="${firmaUrl}" alt="Firma ${nome}" style="display:block;height:48px;max-width:220px;object-fit:contain;object-position:left bottom;margin-bottom:5px;" />
+      ${rigaAttestazioneHtml}
       <div style="border-bottom:1px solid #374151;width:210px;"></div>
     </div>
   `
@@ -429,7 +434,7 @@ async function salvaImmagineFirma(userId, invioId, firmaBase64) {
 
 async function generaPdfFirmato(preventivo, profile, firmaRenderUrl, nomeCliente, firmatoAt) {
   let html = await htmlPreventivoDaRecord(preventivo, profile)
-  html = inserisciBloccoFirmaInHtml(html, bloccoFirmaCliente(firmaRenderUrl, nomeCliente, firmatoAt))
+  html = inserisciBloccoFirmaInHtml(html, bloccoFirmaCliente(firmaRenderUrl, nomeCliente, firmatoAt, 'online'))
   const pdfBuffer = await generaPdfBufferDaHtml(html)
   const path = `${preventivo.user_id}/firmati/${preventivo.id}-${Date.now()}.pdf`
   const { error } = await supabase.storage
@@ -517,7 +522,7 @@ async function urlInvioFirmaArtigiano(preventivoId, userId) {
   }
 }
 
-async function accettaFirma(token, { firmaBase64, accettato }, audit) {
+async function accettaFirma(token, { firmaBase64, accettato, sessionToken }, audit) {
   const risolto = await risolviInvioDaToken(token)
   if (risolto.errore && risolto.errore !== 'gia_firmato') {
     return { ok: false, errore: risolto.errore }
@@ -530,10 +535,20 @@ async function accettaFirma(token, { firmaBase64, accettato }, audit) {
     }
   }
 
+  const invio = risolto.invio
+  const { verificaSessionTokenFirma } = require('./firmaOtp')
+  const sessione = verificaSessionTokenFirma(token, sessionToken, invio)
+  if (!sessione.ok) {
+    return {
+      ok: false,
+      errore: sessione.errore || 'sessione_non_valida',
+      httpStatus: 401,
+    }
+  }
+
   if (!accettato) return { ok: false, errore: 'accettazione_richiesta' }
   if (!firmaBase64) return { ok: false, errore: 'firma_richiesta' }
 
-  const invio = risolto.invio
   const preventivo = invio.preventivi
   const profile = await caricaProfiloPerPreventivo(invio.user_id)
   const nomeCliente = preventivo.clienti?.nome || preventivo.nome_cliente || 'Cliente'
@@ -605,6 +620,8 @@ async function datiPaginaFirma(token) {
   const invio = risolto.invio
   const preventivo = invio.preventivi
   const nomeCliente = preventivo?.clienti?.nome || preventivo?.nome_cliente || 'Cliente'
+  const emailRaw = preventivo?.clienti?.email
+  const emailCliente = typeof emailRaw === 'string' && emailRaw.trim() ? emailRaw.trim() : null
   const nomeAzienda = (await caricaProfiloPerPreventivo(invio.user_id))?.nome_azienda || 'Azienda'
 
   if (risolto.errore === 'gia_firmato') {
@@ -631,6 +648,7 @@ async function datiPaginaFirma(token) {
     stato: 'pronto',
     nomeCliente,
     nomeAzienda,
+    emailCliente,
     importoTotale: preventivo.importo_totale,
     titolo: preventivo.titolo,
     html,

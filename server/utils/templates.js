@@ -214,7 +214,21 @@ function tabellaVoci(sfondoHeader, testoHeader, sfondoRiga, sfondoAlt, testoPrim
   const pageBreakScript = generaPageBreakScript()
   const pageFooterHtml = bloccoPageFooter(template, { nome, citta, telefono, numeroPreventivo, data, coloreHex })
 
-return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=500, initial-scale=0.7, shrink-to-fit=yes"><link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&display=swap" rel="stylesheet"><style>@media print{thead{display:table-row-group}}body{position:relative}</style></head><body>${templates[template] || templates.pulito}${pageFooterHtml}${pageBreakScript}</body></html>`
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=500, initial-scale=0.7, shrink-to-fit=yes"><link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&display=swap" rel="stylesheet"><style>@media print{thead{display:table-row-group}}body{position:relative}</style></head><body>${templates[template] || templates.pulito}${pageFooterHtml}${pageBreakScript}</body></html>`
 }
 
-module.exports = { generaHTML, parsaPreventivo }
+function formattaFirmaDigitaleCliente(firmatoAt, metodoFirma) {
+  if (!firmatoAt) return ''
+  const d = new Date(firmatoAt)
+  if (Number.isNaN(d.getTime())) return ''
+
+  const data = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' })
+  if (metodoFirma === 'manuale') {
+    return `Firmato a mano il ${data}`
+  }
+
+  const ora = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  return `Firmato digitalmente il ${data} alle ${ora}`
+}
+
+module.exports = { generaHTML, parsaPreventivo, formattaFirmaDigitaleCliente }

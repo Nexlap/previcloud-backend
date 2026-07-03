@@ -2,8 +2,10 @@ const express = require('express')
 const router = express.Router()
 const verificaUtente = require('../middleware/auth')
 const { firmaPublicRateLimit } = require('../middleware/firmaRateLimit')
+const { firmaOtpRichiediRateLimit } = require('../middleware/firmaOtpRateLimit')
 const { sendError } = require('../utils/http')
 const { supabase } = require('../config')
+const { richiediOtpFirma, verificaOtpFirma } = require('../utils/firmaOtp')
 const {
   urlFirma,
   creaInvio,
@@ -125,9 +127,43 @@ router.get('/api/public/firma/:token', firmaPublicRateLimit, async (req, res) =>
   }
 })
 
+router.post('/api/firma/:token/otp/richiedi', firmaOtpRichiediRateLimit, express.json(), async (req, res) => {
+  try {
+    const { email } = req.body || {}
+    const result = await richiediOtpFirma(req.params.token, email)
+    res.json(result)
+  } catch (err) {
+    console.error('[firma] otp/richiedi:', err.message)
+    res.json({
+      ok: true,
+      message: 'Se l\'indirizzo email è corretto, riceverai a breve un codice di verifica.',
+    })
+  }
+})
+
+router.post('/api/firma/:token/otp/verifica', firmaPublicRateLimit, express.json(), async (req, res) => {
+  try {
+    const { codice } = req.body || {}
+    const result = await verificaOtpFirma(req.params.token, codice)
+    if (!result.ok) {
+      const body = { error: result.error }
+      if (typeof result.tentativiRimasti === 'number') {
+        body.tentativiRimasti = result.tentativiRimasti
+      }
+      return res.status(result.status || 400).json(body)
+    }
+    res.json({ ok: true, sessionToken: result.sessionToken })
+  } catch (err) {
+    sendError(res, err)
+  }
+})
+
 router.post('/api/public/firma/:token/accetta', firmaPublicRateLimit, express.json({ limit: '10mb' }), async (req, res) => {
   try {
-    const { firma_base64, accettato } = req.body
+    const { firma_base64, accettato, session_token } = req.body
+    const authHeader = req.headers.authorization || ''
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+    const sessionToken = bearer || session_token || null
     const audit = {
       ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       user_agent: req.headers['user-agent'] || '',
@@ -135,9 +171,13 @@ router.post('/api/public/firma/:token/accetta', firmaPublicRateLimit, express.js
     const result = await accettaFirma(req.params.token, {
       firmaBase64: firma_base64,
       accettato: !!accettato,
+      sessionToken,
     }, audit)
 
     if (!result.ok) {
+      if (result.httpStatus === 401) {
+        return res.status(401).json({ error: 'Verifica email richiesta o sessione scaduta.' })
+      }
       const status = result.errore === 'link_non_valido' ? 404 : 400
       return res.status(status).json({ error: result.errore })
     }
