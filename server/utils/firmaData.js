@@ -664,6 +664,7 @@ module.exports = {
   baseUrlFirma,
   creaInvio,
   invioAttivo,
+  risolviInvioDaToken,
   datiPaginaFirma,
   accettaFirma,
   registraFirmaManuale,
