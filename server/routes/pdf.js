@@ -27,6 +27,23 @@ function sendRouteError(res, err) {
   return sendError(res, err)
 }
 
+function logUploadPdfFallito(err) {
+  const message = err?.message || String(err)
+  console.error('[genera-pdf-file] upload Storage fallito:', message)
+  if (process.env.SENTRY_DSN) {
+    try {
+      const Sentry = require('@sentry/node')
+      if (err instanceof Error) {
+        Sentry.captureException(err)
+      } else {
+        Sentry.captureMessage(`genera-pdf-file upload fallito: ${message}`)
+      }
+    } catch {
+      // Sentry non disponibile
+    }
+  }
+}
+
 function dataScadenzaRata(anno, mese, giornoScadenza) {
   const ultimoGiorno = new Date(anno, mese, 0).getDate()
   const giorno = Math.min(Math.max(1, giornoScadenza || 1), ultimoGiorno)
@@ -63,23 +80,45 @@ router.post('/api/genera-pdf-file', express.json(), async (req, res) => {
 
     const { html, versione, numeroPreventivo } = await generaHtmlPreventivo(req, user, { assegnaNumero: true })
     const pdfBuffer = await generaPdfBufferDaHtml(html)
+    const pdfBase64 = Buffer.from(pdfBuffer).toString('base64')
     trackEvento({ userId: user.id, evento: 'pdf_generato', schermata: 'preventivo-pdf', dati: { template: req.body.template, versione } })
+
+    let pdfUrl = null
+    let storagePath = null
+    try {
+      const upload = await salvaPdfSuStorage(user.id, pdfBase64)
+      if (upload.error) {
+        logUploadPdfFallito(upload.error)
+      } else {
+        pdfUrl = upload.pdfUrl
+        storagePath = upload.storagePath
+      }
+    } catch (uploadErr) {
+      logUploadPdfFallito(uploadErr)
+    }
+
+    const pdfRefPerDb = storagePath || pdfUrl || pdfUrlBody || null
 
     if (bozza) {
       await finalizzaPreventivoBozza(user.id, bozza.id, {
         numeroPreventivo,
         testo: req.body.testo,
         versione,
-        pdf_url: pdfUrlBody,
+        pdf_url: pdfRefPerDb,
       })
     }
 
     const payload = {
-      pdf_base64: Buffer.from(pdfBuffer).toString('base64'),
+      pdf_base64: pdfBase64,
       versione,
       numeroPreventivo,
       numeroProvvisorio: false,
       html,
+    }
+    if (pdfUrl) {
+      payload.pdf_url = pdfUrl
+      payload.storage_path = storagePath
+      payload.expires_in = SIGNED_URL_EXPIRY_ARTIGIANO_SEC
     }
     if (bozza) payload.preventivo_id = bozza.id
     res.json(payload)
