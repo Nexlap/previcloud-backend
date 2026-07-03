@@ -24,7 +24,7 @@ async function launchBrowser() {
 }
 
 async function getBrowser() {
-  if (browserInstance?.isConnected()) {
+  if (browserInstance?.connected) {
     return browserInstance
   }
 
