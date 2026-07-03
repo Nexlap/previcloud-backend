@@ -17,8 +17,16 @@ const {
   caricaBozzaFinalizzabile,
   finalizzaPreventivoBozza,
 } = require('../utils/preventivoBozza')
+const { generaPdfFileRateLimit } = require('../middleware/pdfRateLimit')
 
 const stripe = getStripeClient()
+
+async function authForGeneraPdfFile(req, res, next) {
+  const user = await verificaUtente(req, res)
+  if (!user) return
+  req.pdfUser = user
+  next()
+}
 
 function sendRouteError(res, err) {
   if (err?.status && err.status >= 400 && err.status < 500) {
@@ -65,9 +73,8 @@ router.post('/api/genera-pdf', express.json(), async (req, res) => {
   }
 })
 
-router.post('/api/genera-pdf-file', express.json(), async (req, res) => {
-  const user = await verificaUtente(req, res)
-  if (!user) return
+router.post('/api/genera-pdf-file', express.json(), authForGeneraPdfFile, generaPdfFileRateLimit, async (req, res) => {
+  const user = req.pdfUser
   try {
     const { preventivo_id: preventivoIdBozza, pdf_url: pdfUrlBody } = req.body
     let bozza = null
