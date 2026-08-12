@@ -14,4 +14,14 @@ const generaPdfFileRateLimit = rateLimit({
   message: { error: 'Troppe richieste di generazione PDF, riprova tra qualche minuto' },
 })
 
-module.exports = { generaPdfFileRateLimit, MAX_REQUESTS, WINDOW_MS }
+const generaPdfRateLimit = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  statusCode: 429,
+  keyGenerator: (req) => req.pdfUser?.id || ipKeyGenerator(req),
+  message: { error: 'Troppe richieste di anteprima, riprova tra qualche minuto' },
+})
+
+module.exports = { generaPdfFileRateLimit, generaPdfRateLimit, MAX_REQUESTS, WINDOW_MS }

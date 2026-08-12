@@ -77,4 +77,27 @@ async function inviaEmailOtpFirma({ emailCliente, nomeCliente, nomeArtigiano, co
   }
 }
 
-module.exports = { inviaEmailPagamentoRicevuto, inviaEmailPagamentoClienteOk, inviaEmailOtpFirma }
+async function inviaEmailNuovaSegnalazione({ titolo, descrizione, tipo, schermata, piattaforma, nomeAzienda, emailUtente }) {
+  if (!resend) return
+  const to = process.env.ADMIN_EMAIL || 'previ_cloud@proton.me'
+  try {
+    await resend.emails.send({
+      from: FROM,
+      to,
+      subject: `Nuova segnalazione: ${titolo}`,
+      html: `
+        <h2>Nuova segnalazione</h2>
+        <p><strong>Titolo:</strong> ${titolo}</p>
+        <p><strong>Tipo:</strong> ${tipo}</p>
+        <p><strong>Descrizione:</strong> ${descrizione}</p>
+        <p><strong>Schermata:</strong> ${schermata || '—'}</p>
+        <p><strong>Piattaforma:</strong> ${piattaforma || '—'}</p>
+        <p><strong>Utente:</strong> ${nomeAzienda || '—'} (${emailUtente || '—'})</p>
+      `,
+    })
+  } catch (err) {
+    console.error('Errore invio email segnalazione:', err.message)
+  }
+}
+
+module.exports = { inviaEmailPagamentoRicevuto, inviaEmailPagamentoClienteOk, inviaEmailOtpFirma, inviaEmailNuovaSegnalazione }

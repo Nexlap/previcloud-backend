@@ -17,7 +17,7 @@ const {
   caricaBozzaFinalizzabile,
   finalizzaPreventivoBozza,
 } = require('../utils/preventivoBozza')
-const { generaPdfFileRateLimit } = require('../middleware/pdfRateLimit')
+const { generaPdfFileRateLimit, generaPdfRateLimit } = require('../middleware/pdfRateLimit')
 
 const stripe = getStripeClient()
 
@@ -62,9 +62,8 @@ function formatDataIt(date) {
   return date.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-router.post('/api/genera-pdf', express.json(), async (req, res) => {
-  const user = await verificaUtente(req, res)
-  if (!user) return
+router.post('/api/genera-pdf', express.json(), authForGeneraPdfFile, generaPdfRateLimit, async (req, res) => {
+  const user = req.pdfUser
   try {
     const { html, versione, numeroPreventivo, numeroProvvisorio } = await generaHtmlPreventivo(req, user, { assegnaNumero: false })
     res.json({ html, versione, numeroPreventivo, numeroProvvisorio })
@@ -287,7 +286,12 @@ router.post('/api/crea-link-pagamento-rata', express.json(), async (req, res) =>
       metadata: { user_id: user.id, rata_id, tipo: 'abbonamento' }
     })
 
-    res.json({ payment_url: session.url })
+    await supabase
+      .from('rate_abbonamento')
+      .update({ stripe_session_id: session.id })
+      .eq('id', rata_id)
+
+    res.json({ payment_url: session.url, stripe_session_id: session.id })
   } catch (err) {
     sendError(res, err)
   }

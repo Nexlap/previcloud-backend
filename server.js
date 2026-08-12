@@ -22,7 +22,6 @@ const ALLOWED_ORIGINS = [
   'https://previcloud.it',
   'https://www.previcloud.it',
   'https://previcloud-web.vercel.app',
-  'https://preventivoai-web.vercel.app', // transizione — rimuovere dopo cutover
   'http://localhost:1420',      // Tauri dev
   'http://localhost:3000',      // Next.js dev
   'tauri://localhost',          // Tauri produzione

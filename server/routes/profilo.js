@@ -61,7 +61,12 @@ Rispondi SOLO con un array JSON valido, niente altro. Formato:
 
 Per unita usa: cad, ora, giorno, mq, ml, set, progetto
 Se il costo non è specificato, metti null.
-Se la descrizione non è chiara, metti stringa vuota.`
+Se il testo non include una descrizione esplicita per un servizio,
+genera tu una breve descrizione plausibile (una frase, max 15 parole)
+basata sul nome del servizio e sulla tua conoscenza del settore
+(idraulica, elettricista, edilizia, ecc.). Non lasciare mai il campo
+descrizione vuoto a meno che il nome del servizio stesso sia troppo
+generico o ambiguo per generarne una sensata.`
 
     const content = immagine_base64
       ? [
