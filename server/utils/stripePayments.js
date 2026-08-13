@@ -68,4 +68,37 @@ async function caricaRataAbbonamento(rataId) {
   return rata
 }
 
-module.exports = { caricaRataAbbonamento, creaSessionePagamento, getStripeClient }
+/**
+ * Invalida una Checkout Session aperta. Per Direct Charges Connect serve lo
+ * stesso stripeAccount usato in create. Errori attesi (già scaduta/pagata/assente)
+ * vengono ignorati; solo errori inattesi vengono loggati.
+ */
+async function scadiSessionePagamento(sessionId, userId) {
+  if (!stripe || !sessionId) return
+
+  try {
+    const options = {}
+    if (userId) {
+      const profilo = await caricaStripeProfiloArtigiano(userId)
+      if (profilo?.stripe_account_id) {
+        options.stripeAccount = profilo.stripe_account_id
+      }
+    }
+    await stripe.checkout.sessions.expire(sessionId, options)
+  } catch (err) {
+    const msg = (err?.message || '').toLowerCase()
+    const code = err?.code || ''
+    const atteso =
+      code === 'resource_missing' ||
+      msg.includes('already expired') ||
+      msg.includes('has already been completed') ||
+      msg.includes('cannot be expired') ||
+      msg.includes('no such checkout.session')
+
+    if (!atteso) {
+      console.error('[stripe] scadiSessionePagamento errore inatteso:', err.message)
+    }
+  }
+}
+
+module.exports = { caricaRataAbbonamento, creaSessionePagamento, getStripeClient, scadiSessionePagamento }

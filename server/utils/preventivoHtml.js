@@ -36,8 +36,11 @@ async function generaHtmlPreventivo(req, user, options = {}) {
   let numeroProvvisorio = false
 
   if (assegnaNumero) {
-    const nuovoContatore = contatoreAttuale + 1
-    await supabase.from('profiles').update({ contatore_preventivi: nuovoContatore }).eq('id', user.id)
+    const { data: nuovoContatore, error: contatoreError } = await supabase.rpc(
+      'incrementa_contatore_preventivi',
+      { user_id_input: user.id }
+    )
+    if (contatoreError) throw contatoreError
     numeroPreventivo = formatNumeroPreventivo(nuovoContatore)
   } else {
     numeroPreventivo = formatNumeroPreventivo(contatoreAttuale + 1)

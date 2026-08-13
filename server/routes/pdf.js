@@ -6,7 +6,7 @@ const { supabase } = require('../config')
 const { generaHtmlPreventivo } = require('../utils/preventivoHtml')
 const { salvaPdfSuStorage } = require('../utils/pdfStorage')
 const { generaPdfBufferDaHtml } = require('../utils/pdfRenderer')
-const { caricaRataAbbonamento, creaSessionePagamento, getStripeClient } = require('../utils/stripePayments')
+const { caricaRataAbbonamento, creaSessionePagamento, getStripeClient, scadiSessionePagamento } = require('../utils/stripePayments')
 const { trackEvento } = require('../utils/analytics')
 const {
   SIGNED_URL_EXPIRY_ARTIGIANO_SEC,
@@ -18,6 +18,11 @@ const {
   finalizzaPreventivoBozza,
 } = require('../utils/preventivoBozza')
 const { generaPdfFileRateLimit, generaPdfRateLimit } = require('../middleware/pdfRateLimit')
+const {
+  applicaLimiteLinkPagamento,
+  applicaLimiteLinkPagamentoRata,
+  applicaLimiteSalvaPdf,
+} = require('../middleware/pagamentiUploadRateLimit')
 
 const stripe = getStripeClient()
 
@@ -148,6 +153,7 @@ router.post('/api/preventivi/bozza', express.json(), async (req, res) => {
 router.post('/api/salva-pdf', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteSalvaPdf(user.id, '/api/salva-pdf', res)) return
   try {
     const { pdf_base64 } = req.body
     if (!pdf_base64) return res.status(400).json({ error: 'PDF mancante' })
@@ -200,6 +206,7 @@ router.get('/api/preventivi/:id/pdf-url', async (req, res) => {
 router.post('/api/crea-link-pagamento', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteLinkPagamento(user.id, '/api/crea-link-pagamento', res)) return
   if (!stripe) return res.status(500).json({ error: 'Stripe non configurato' })
 
   try {
@@ -212,15 +219,20 @@ router.post('/api/crea-link-pagamento', express.json(), async (req, res) => {
     // Carica importo dal DB — non si fida del client
     const { data: preventivo, error: prevErr } = await supabase
       .from('preventivi')
-      .select('id, importo_totale, user_id')
+      .select('id, importo_totale, user_id, is_ultimo, stripe_session_id')
       .eq('id', preventivo_id)
       .eq('user_id', user.id)
-      .eq('is_ultimo', true)
       .is('deleted_at', null)
       .maybeSingle()
 
     if (prevErr || !preventivo) {
       return res.status(404).json({ error: 'Preventivo non trovato' })
+    }
+
+    if (!preventivo.is_ultimo) {
+      return res.status(400).json({
+        error: 'Impossibile creare un link di pagamento per una versione non più attuale del preventivo',
+      })
     }
 
     if (!preventivo.importo_totale || preventivo.importo_totale <= 0) {
@@ -230,6 +242,11 @@ router.post('/api/crea-link-pagamento', express.json(), async (req, res) => {
     const amount = Math.round(preventivo.importo_totale * 100)
     if (amount < 50) {
       return res.status(400).json({ error: 'Importo troppo basso (minimo €0,50)' })
+    }
+
+    // Invalida eventuale sessione precedente ancora aperta (anti link stale / doppio link)
+    if (preventivo.stripe_session_id) {
+      await scadiSessionePagamento(preventivo.stripe_session_id, user.id)
     }
 
     const session = await creaSessionePagamento({
@@ -260,6 +277,7 @@ router.post('/api/crea-link-pagamento', express.json(), async (req, res) => {
 router.post('/api/crea-link-pagamento-rata', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteLinkPagamentoRata(user.id, '/api/crea-link-pagamento-rata', res)) return
   if (!stripe) return res.status(500).json({ error: 'Stripe non configurato' })
 
   try {
@@ -274,6 +292,11 @@ router.post('/api/crea-link-pagamento-rata', express.json(), async (req, res) =>
 
     const residuo = rata.importo - (rata.acconto || 0)
     if (residuo <= 0) return res.status(400).json({ error: 'Rata già saldata' })
+
+    // Invalida eventuale sessione precedente ancora aperta (anti doppio addebito)
+    if (rata.stripe_session_id) {
+      await scadiSessionePagamento(rata.stripe_session_id, user.id)
+    }
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
     const descrizione = rata.abbonamenti?.giorno_scadenza

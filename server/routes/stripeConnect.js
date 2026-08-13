@@ -5,11 +5,161 @@ const { sendError } = require('../utils/http')
 const { getStripeClient } = require('../utils/stripePayments')
 const { creaNotifica } = require('../utils/firmaData')
 const { inviaEmailPagamentoRicevuto, inviaEmailPagamentoClienteOk } = require('../utils/email')
+const { applicaLimiteConnettiAccount } = require('../middleware/pagamentiUploadRateLimit')
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
 function formatImportoEuro(n) {
   return Number(n).toFixed(2).replace('.', ',')
+}
+
+/** Stripe può passare id stringa o oggetto espanso. */
+function paymentIntentIdDaStripe(value) {
+  if (!value) return null
+  if (typeof value === 'string') return value
+  if (typeof value === 'object' && value.id) return value.id
+  return null
+}
+
+/**
+ * Lookup record da charge/dispute: gli eventi charge.* espongono payment_intent,
+ * non il checkout session id. Il PI viene salvato su checkout.session.completed.
+ */
+async function trovaRecordPerPaymentIntent(paymentIntentId) {
+  if (!paymentIntentId) return null
+
+  const { data: preventivo, error: prevErr } = await supabase
+    .from('preventivi')
+    .select('id')
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .maybeSingle()
+  if (prevErr) throw prevErr
+  if (preventivo) return { tipo: 'preventivo', id: preventivo.id }
+
+  const { data: rata, error: rataErr } = await supabase
+    .from('rate_abbonamento')
+    .select('id')
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .maybeSingle()
+  if (rataErr) throw rataErr
+  if (rata) return { tipo: 'rata', id: rata.id }
+
+  return null
+}
+
+async function marcaPreventivoRimborsato(preventivoId) {
+  const { error } = await supabase
+    .from('preventivi')
+    .update({
+      pagato: false,
+      rimborsato: true,
+      rimborsato_at: new Date().toISOString(),
+      in_disputa: false,
+    })
+    .eq('id', preventivoId)
+  if (error) throw error
+}
+
+async function marcaRataRimborsata(rataId) {
+  const { error } = await supabase
+    .from('rate_abbonamento')
+    .update({
+      stato: 'da_incassare',
+      acconto: 0,
+      data_incasso: null,
+      rimborsato: true,
+      rimborsato_at: new Date().toISOString(),
+      in_disputa: false,
+    })
+    .eq('id', rataId)
+  if (error) throw error
+}
+
+async function gestisciChargeRefunded(charge) {
+  const paymentIntentId = paymentIntentIdDaStripe(charge.payment_intent)
+  const record = await trovaRecordPerPaymentIntent(paymentIntentId)
+
+  if (!record) {
+    console.warn(
+      '[stripe webhook] charge.refunded: nessun preventivo/rata per payment_intent (possibile pagamento pre-colonna)',
+      { payment_intent: paymentIntentId, charge_id: charge.id }
+    )
+    return
+  }
+
+  if (record.tipo === 'preventivo') {
+    await marcaPreventivoRimborsato(record.id)
+    console.info('[stripe webhook] preventivo rimborsato:', record.id)
+    return
+  }
+
+  await marcaRataRimborsata(record.id)
+  console.info('[stripe webhook] rata rimborsata:', record.id)
+}
+
+async function gestisciDisputeCreated(dispute) {
+  const paymentIntentId = paymentIntentIdDaStripe(dispute.payment_intent)
+  const record = await trovaRecordPerPaymentIntent(paymentIntentId)
+
+  if (!record) {
+    console.error(
+      '[ATTENZIONE] Disputa Stripe aperta ma nessun preventivo/rata per payment_intent - richiede intervento manuale',
+      { payment_intent: paymentIntentId, dispute_id: dispute.id }
+    )
+    return
+  }
+
+  const tabella = record.tipo === 'preventivo' ? 'preventivi' : 'rate_abbonamento'
+  const { error } = await supabase
+    .from(tabella)
+    .update({ in_disputa: true })
+    .eq('id', record.id)
+  if (error) throw error
+
+  console.error(
+    `[ATTENZIONE] Disputa Stripe aperta su ${record.tipo} id=${record.id} - richiede intervento manuale`,
+    { dispute_id: dispute.id, payment_intent: paymentIntentId }
+  )
+}
+
+async function gestisciDisputeClosed(dispute) {
+  const paymentIntentId = paymentIntentIdDaStripe(dispute.payment_intent)
+  const record = await trovaRecordPerPaymentIntent(paymentIntentId)
+  const status = dispute.status
+
+  if (!record) {
+    console.warn(
+      '[stripe webhook] charge.dispute.closed: nessun preventivo/rata per payment_intent',
+      { payment_intent: paymentIntentId, dispute_id: dispute.id, status }
+    )
+    return
+  }
+
+  if (status === 'won') {
+    const tabella = record.tipo === 'preventivo' ? 'preventivi' : 'rate_abbonamento'
+    const { error } = await supabase
+      .from(tabella)
+      .update({ in_disputa: false })
+      .eq('id', record.id)
+    if (error) throw error
+    console.info('[stripe webhook] disputa vinta, in_disputa rimosso:', record.tipo, record.id)
+    return
+  }
+
+  if (status === 'lost') {
+    if (record.tipo === 'preventivo') {
+      await marcaPreventivoRimborsato(record.id)
+    } else {
+      await marcaRataRimborsata(record.id)
+    }
+    console.info('[stripe webhook] disputa persa, record rimborsato:', record.tipo, record.id)
+    return
+  }
+
+  console.info('[stripe webhook] charge.dispute.closed status non gestito:', status, {
+    tipo: record.tipo,
+    id: record.id,
+  })
 }
 
 async function caricaRataPerWebhook(rataId) {
@@ -38,7 +188,7 @@ async function riconciliaPagamentoAbbonamento(session) {
 
     const { data: preventivo, error: preventivoError } = await supabase
       .from('preventivi')
-      .select('id, user_id, pagato, importo_totale')
+      .select('id, user_id, pagato, importo_totale, is_ultimo')
       .eq('stripe_session_id', session.id)
       .limit(1)
       .maybeSingle()
@@ -56,6 +206,14 @@ async function riconciliaPagamentoAbbonamento(session) {
       return
     }
 
+    if (preventivo.is_ultimo === false) {
+      console.warn(
+        '[stripe webhook] pagamento ricevuto su versione preventivo non più attuale, richiede intervento manuale',
+        { preventivo_id: preventivo.id, stripe_session_id: session.id }
+      )
+      return
+    }
+
     // Verifica importo: amount_total deve corrispondere all'importo atteso nei metadata
     const importoAtteso = metadata.importo_atteso ? Number(metadata.importo_atteso) : null
     if (importoAtteso && session.amount_total !== importoAtteso) {
@@ -63,9 +221,19 @@ async function riconciliaPagamentoAbbonamento(session) {
       // Non blocchiamo il pagamento ma lo logghiamo per audit
     }
 
+    const paymentIntentId = paymentIntentIdDaStripe(session.payment_intent)
+    const updatePreventivo = {
+      pagato: true,
+      data_pagamento: new Date().toISOString(),
+      stato: 'accettato',
+    }
+    if (paymentIntentId) {
+      updatePreventivo.stripe_payment_intent_id = paymentIntentId
+    }
+
     const { error: updatePreventivoError } = await supabase
       .from('preventivi')
-      .update({ pagato: true, data_pagamento: new Date().toISOString(), stato: 'accettato' })
+      .update(updatePreventivo)
       .eq('id', preventivo.id)
 
     if (updatePreventivoError) throw updatePreventivoError
@@ -169,13 +337,19 @@ async function riconciliaPagamentoAbbonamento(session) {
     return
   }
 
+  const paymentIntentId = paymentIntentIdDaStripe(session.payment_intent)
+  const updateRata = {
+    stato: 'incassato',
+    data_incasso: new Date().toISOString(),
+    acconto: rata.importo,
+  }
+  if (paymentIntentId) {
+    updateRata.stripe_payment_intent_id = paymentIntentId
+  }
+
   const { error: updateError } = await supabase
     .from('rate_abbonamento')
-    .update({
-      stato: 'incassato',
-      data_incasso: new Date().toISOString(),
-      acconto: rata.importo,
-    })
+    .update(updateRata)
     .eq('id', rataId)
 
   if (updateError) throw updateError
@@ -229,6 +403,7 @@ function statoOnboardingDaAccountStripe(account) {
 router.post('/api/stripe/connetti-account', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteConnettiAccount(user.id, '/api/stripe/connetti-account', res)) return
 
   const stripe = getStripeClient()
   if (!stripe) return res.status(500).json({ error: 'Stripe non configurato' })
@@ -254,7 +429,7 @@ router.post('/api/stripe/connetti-account', express.json(), async (req, res) => 
       .update({ stripe_account_id: account.id })
       .eq('id', user.id)
 
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) return sendError(res, error)
 
     res.json({ stripe_account_id: account.id })
   } catch (err) {
@@ -360,7 +535,8 @@ webhookRouter.post('/api/stripe/webhook', express.raw({ type: 'application/json'
   }
 
   if (!event) {
-    return res.status(400).json({ error: `Firma webhook non valida: ${errFirma.message}` })
+    console.error('[stripe webhook] firma non valida:', errFirma?.message || errFirma)
+    return res.status(400).json({ error: 'Firma webhook non valida' })
   }
 
   if (event.type === 'account.updated') {
@@ -380,6 +556,24 @@ webhookRouter.post('/api/stripe/webhook', express.raw({ type: 'application/json'
       await riconciliaPagamentoAbbonamento(session)
     } catch (err) {
       console.error('[stripe webhook] checkout.session.completed', err.message)
+    }
+  } else if (event.type === 'charge.refunded') {
+    try {
+      await gestisciChargeRefunded(event.data.object)
+    } catch (err) {
+      console.error('[stripe webhook] charge.refunded', err.message)
+    }
+  } else if (event.type === 'charge.dispute.created') {
+    try {
+      await gestisciDisputeCreated(event.data.object)
+    } catch (err) {
+      console.error('[stripe webhook] charge.dispute.created', err.message)
+    }
+  } else if (event.type === 'charge.dispute.closed') {
+    try {
+      await gestisciDisputeClosed(event.data.object)
+    } catch (err) {
+      console.error('[stripe webhook] charge.dispute.closed', err.message)
     }
   }
 

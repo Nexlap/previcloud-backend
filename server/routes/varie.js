@@ -7,12 +7,16 @@ const { caricaTrascrizioni, salvaPreventivoBozza } = require('../utils/varieData
 const { calcolaIncassatoTotale } = require('../utils/incassi')
 const { supabase } = require('../config')
 const { inviaEmailNuovaSegnalazione } = require('../utils/email')
+const {
+  applicaLimiteTrascrivi,
+  applicaLimiteSegnalazione,
+} = require('../middleware/varieRateLimit')
 
 router.post('/api/salva-preventivo', asyncRoute(async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
   const { data, error } = await salvaPreventivoBozza(user.id, req.body)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return sendError(res, error)
   res.json(data)
 }))
 
@@ -20,6 +24,7 @@ router.post('/api/salva-preventivo', asyncRoute(async (req, res) => {
 router.post('/api/trascrivi', express.json({ limit: '50mb' }), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteTrascrivi(user.id, '/api/trascrivi', res)) return
   try {
     const { audio } = req.body
     if (!audio) return res.status(400).json({ error: 'Audio mancante' })
@@ -36,7 +41,7 @@ router.get('/api/trascrizioni', asyncRoute(async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
   const { data, error } = await caricaTrascrizioni(user.id)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return sendError(res, error)
   res.json(data)
 }))
 
@@ -64,6 +69,7 @@ router.get('/api/versione-minima', (req, res) => {
 router.post('/api/segnalazione-notifica', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteSegnalazione(user.id, '/api/segnalazione-notifica', res)) return
   try {
     const { titolo, descrizione, tipo, schermata, piattaforma } = req.body
     if (!titolo || !descrizione) {

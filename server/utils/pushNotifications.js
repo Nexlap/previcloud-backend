@@ -6,6 +6,33 @@ const supabaseAdmin = createClient(
 )
 
 /**
+ * Registra un Expo push token sul profilo, con dedup cross-account:
+ * azzera lo stesso token su altri profili prima di assegnarlo all'utente corrente.
+ */
+async function registraPushTokenPerUtente(userId, token) {
+  if (typeof token !== 'string' || !token.startsWith('ExponentPushToken[')) {
+    const err = new Error('Token push non valido')
+    err.status = 400
+    throw err
+  }
+
+  const { error: clearError } = await supabaseAdmin
+    .from('profiles')
+    .update({ expo_push_token: null })
+    .eq('expo_push_token', token)
+    .neq('id', userId)
+
+  if (clearError) throw clearError
+
+  const { error: setError } = await supabaseAdmin
+    .from('profiles')
+    .update({ expo_push_token: token })
+    .eq('id', userId)
+
+  if (setError) throw setError
+}
+
+/**
  * Manda una notifica push Expo a un utente specifico.
  * Non lancia eccezioni: se la push fallisce, il flusso continua.
  *
@@ -62,4 +89,4 @@ async function mandaPushNotifica(userId, titolo, corpo, dati = {}) {
   }
 }
 
-module.exports = { mandaPushNotifica }
+module.exports = { mandaPushNotifica, registraPushTokenPerUtente }

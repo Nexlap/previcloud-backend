@@ -79,7 +79,7 @@ async function inviaEmailOtpFirma({ emailCliente, nomeCliente, nomeArtigiano, co
 
 async function inviaEmailNuovaSegnalazione({ titolo, descrizione, tipo, schermata, piattaforma, nomeAzienda, emailUtente }) {
   if (!resend) return
-  const to = process.env.ADMIN_EMAIL || 'previ_cloud@proton.me'
+  const to = process.env.ADMIN_EMAIL || 'info@previcloud.it'
   try {
     await resend.emails.send({
       from: FROM,

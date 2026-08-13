@@ -25,7 +25,8 @@ async function deleteIfTableExists(table, buildQuery) {
   const { error } = await buildQuery(supabase.from(table))
   if (!error) return { table, deleted: true }
   if (isMissingTableError(error)) return { table, deleted: false, skipped: true, reason: 'missing_table' }
-  throw error
+  console.error(`[elimina-account] table ${table}:`, error.message || error)
+  return { table, deleted: false, error: 'table_failed' }
 }
 
 async function listStorageFiles(bucket, prefix) {
@@ -54,7 +55,10 @@ async function removeStoragePrefix(bucket, prefix) {
     const chunk = files.slice(i, i + 100)
     if (chunk.length > 0) {
       const { error } = await supabase.storage.from(bucket).remove(chunk)
-      if (error) return { bucket, deleted: false, error: error.message }
+      if (error) {
+        console.error(`[elimina-account] storage ${bucket}:`, error.message || error)
+        return { bucket, deleted: false, error: 'storage_failed' }
+      }
     }
   }
   return { bucket, deleted: true, files: files.length }
@@ -121,6 +125,14 @@ router.post('/api/elimina-account', eliminaAccountLimit, express.json(), asyncRo
 
   for (const [table, buildQuery] of deletions) {
     report.tables.push(await deleteIfTableExists(table, buildQuery))
+  }
+
+  const haErroriParziali =
+    report.storage.some((s) => Boolean(s.error)) ||
+    report.tables.some((t) => Boolean(t.error))
+
+  if (haErroriParziali) {
+    return res.status(500).json({ success: false, report })
   }
 
   const { error: authError } = await supabase.auth.admin.deleteUser(user.id)

@@ -24,7 +24,7 @@ router.post('/api/crea-cliente-da-chat', express.json(), async (req, res) => {
   try {
     const { nome, telefono, email, indirizzo } = req.body
     const { data, error } = await creaClienteChat({ userId: user.id, nome, telefono, email, indirizzo })
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) return sendError(res, error)
     res.json({ cliente: data })
   } catch (err) {
     sendError(res, err)

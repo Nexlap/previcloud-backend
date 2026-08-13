@@ -123,7 +123,7 @@ router.get('/api/public/firma/:token', firmaPublicRateLimit, async (req, res) =>
     const data = await datiPaginaFirma(req.params.token)
     res.json(data)
   } catch (err) {
-    sendError(res, err)
+    sendError(res, err, 'Impossibile caricare la pagina di firma')
   }
 })
 
@@ -154,7 +154,7 @@ router.post('/api/firma/:token/otp/verifica', firmaPublicRateLimit, express.json
     }
     res.json({ ok: true, sessionToken: result.sessionToken })
   } catch (err) {
-    sendError(res, err)
+    sendError(res, err, 'Verifica non riuscita. Riprova più tardi.')
   }
 })
 
@@ -184,7 +184,7 @@ router.post('/api/public/firma/:token/accetta', firmaPublicRateLimit, express.js
 
     res.json(result)
   } catch (err) {
-    sendError(res, err)
+    sendError(res, err, 'Impossibile completare la firma. Riprova più tardi.')
   }
 })
 

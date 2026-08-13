@@ -2,18 +2,23 @@ const express = require('express')
 const router = express.Router()
 const verificaUtente = require('../middleware/auth')
 const { applicaLimiteAi } = require('../middleware/aiRateLimit')
+const {
+  applicaLimiteUploadLogo,
+  applicaLimiteRegistraPushToken,
+} = require('../middleware/pagamentiUploadRateLimit')
 const { asyncRoute, sendError } = require('../utils/http')
 const { trackAI, trackEvento } = require('../utils/analytics')
 const { salvaLogoProfilo } = require('../utils/logoStorage')
 const { creaMessaggioClaude } = require('../utils/aiClient')
 const { caricaProfilo } = require('../utils/profiloData')
 const { parseJsonArrayFromAI } = require('../utils/parseJsonArray')
+const { registraPushTokenPerUtente } = require('../utils/pushNotifications')
 
 router.get('/api/profilo', asyncRoute(async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
   const { data, error } = await caricaProfilo(user.id)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return sendError(res, error)
   res.json(data)
 }))
 
@@ -22,11 +27,28 @@ router.get('/api/profilo', asyncRoute(async (req, res) => {
 router.post('/api/upload-logo', express.json(), async (req, res) => {
   const user = await verificaUtente(req, res)
   if (!user) return
+  if (!applicaLimiteUploadLogo(user.id, '/api/upload-logo', res)) return
   try {
     const { logo_base64, mime_type } = req.body
     const { logoUrl, error } = await salvaLogoProfilo({ userId: user.id, logoBase64: logo_base64, mimeType: mime_type })
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) return sendError(res, error)
     res.json({ logo_url: logoUrl })
+  } catch (err) {
+    sendError(res, err)
+  }
+})
+
+router.post('/api/registra-push-token', express.json(), async (req, res) => {
+  const user = await verificaUtente(req, res)
+  if (!user) return
+  if (!applicaLimiteRegistraPushToken(user.id, '/api/registra-push-token', res)) return
+  try {
+    const { token } = req.body || {}
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Token mancante' })
+    }
+    await registraPushTokenPerUtente(user.id, token.trim())
+    res.json({ ok: true })
   } catch (err) {
     sendError(res, err)
   }
