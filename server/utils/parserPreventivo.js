@@ -16,6 +16,7 @@ function parsaPreventivo(testo) {
   let pagamento = ''
   let canoneMensile = ''
   let canoneScadenza = ''
+  let canoneMensilita = ''
   let pagamentoRate = null
   let contatti = ''
   let rimborsi = []
@@ -114,6 +115,7 @@ function parsaPreventivo(testo) {
     if (riga.startsWith('TOTALE:')) { totale = riga.replace('TOTALE:', '').trim(); continue }
     if (riga.startsWith('Note:')) { note = riga.replace('Note:', '').trim(); continue }
     if (riga.startsWith('CANONE MENSILE:')) { canoneMensile = riga.replace('CANONE MENSILE:', '').trim(); continue }
+    if (riga.startsWith('MENSILITA:')) { canoneMensilita = riga.replace('MENSILITA:', '').trim(); continue }
     if (riga.startsWith('SCADENZA PRIMO CANONE:')) { canoneScadenza = riga.replace('SCADENZA PRIMO CANONE:', '').trim(); continue }
     if (riga.startsWith('PAGAMENTO A RATE:')) {
       pagamentoRate = pagamentoRate || {}
@@ -161,7 +163,7 @@ function parsaPreventivo(testo) {
 
   if (servizioCorrente) voci.push(servizioCorrente)
   if (rimborsoCorrente) rimborsi.push(rimborsoCorrente)
-  return { titolo, data, validita, problema, voci, rimborsi, imponibile, iva, totaleLordo, totaleImponibile, sconto, totale, note, pagamento, canoneMensile, canoneScadenza, pagamentoRate, contatti }
+  return { titolo, data, validita, problema, voci, rimborsi, imponibile, iva, totaleLordo, totaleImponibile, sconto, totale, note, pagamento, canoneMensile, canoneScadenza, canoneMensilita, pagamentoRate, contatti }
 }
 
 module.exports = { parsaPreventivo }

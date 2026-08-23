@@ -31,6 +31,7 @@ function escapeParsedPreventivo(p) {
     validita: escapeHtml(p.validita),
     canoneMensile: escapeHtml(p.canoneMensile),
     canoneScadenza: escapeHtml(p.canoneScadenza),
+    canoneMensilita: escapeHtml(p.canoneMensilita),
     imponibile: escapeHtml(p.imponibile),
     iva: escapeHtml(p.iva),
     totaleLordo: escapeHtml(p.totaleLordo),
@@ -87,6 +88,7 @@ function generaHTML(testo, template, dati) {
   const canoneMensileHtml = p.canoneMensile ? (() => {
     const righe = [
       p.canoneMensile,
+      p.canoneMensilita ? `Durata: ${p.canoneMensilita} mesi` : '',
       p.canoneScadenza ? `Primo canone: ${p.canoneScadenza}` : '',
     ].filter(Boolean).join('<br>')
     return `<div style="margin-top:12px;padding:12px 16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:12px;color:#3730a3"><strong>Canone mensile:</strong><br>${righe}</div>`
